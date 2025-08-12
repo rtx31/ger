@@ -91,8 +91,9 @@ resize();
 let bucket = { x: CONFIG.W/2, y: CONFIG.bucketY, w: CONFIG.bucketW, h: CONFIG.bucketH };
 let stars = [];
 let score = 0;
-let lives = 3;
-let level = 1;
+let lives = 3;   // jumlah nyawa awal
+let level = 1;   // level awal
+let ballSpeed = 2; // kecepatan bola awal
 let elapsedSpawn = 0;
 let lastTime = 0;
 let keys = {};
