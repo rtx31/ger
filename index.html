@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catch the Falling Logos — Ready</title>
+<style>
+  :root{--bg:#071022;--panel:#06202a;--accent:#ffd166}
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#00121a);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#fff}
+  .wrap{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box}
+  canvas{background:linear-gradient(180deg,#071a2b,#00151f);border-radius:12px;max-width:100%;height:auto;display:block}
+  .hud{position:fixed;left:12px;top:12px;display:flex;gap:8px}
+  .pill{background:rgba(255,255,255,0.05);padding:8px 10px;border-radius:999px;font-weight:700}
+  .controls{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+  .touch{width:78px;height:56px;border-radius:12px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:900;user-select:none}
+  .menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .menu-box{pointer-events:auto;background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;text-align:center}
+  button{cursor:pointer;padding:10px 14px;border-radius:10px;border:none;background:var(--accent);font-weight:800}
+  @media(min-width:900px){ .touch{width:110px;height:70px} }
+</style>
+</head>
+<body>
+  <div class="hud">
+    <div class="pill" id="scoreP">Score: 0</div>
+    <div class="pill" id="livesP">Lives: 3</div>
+    <div class="pill" id="levelP">Level: 1</div>
+  </div>
+
+  <div class="wrap">
+    <canvas id="gameCanvas" width="420" height="640" aria-label="Catch the Falling Logos"></canvas>
+  </div>
+
+  <div class="controls" aria-hidden="false">
+    <div class="touch" id="leftBtn">◀</div>
+    <div class="touch" id="rightBtn">▶</div>
+  </div>
+
+  <div class="menu">
+    <div class="menu-box" id="menuBox">
+      <h2>Catch the Falling Logos</h2>
+      <p>Logo kamu sudah terpasang. Klik <strong>Start</strong> untuk mulai (diperlukan untuk memutar audio).</p>
+      <div style="margin-top:8px">
+        <button id="startBtn">Start</button>
+      </div>
+      <p style="font-size:12px;opacity:0.85;margin-top:8px">Kontrol: ← → atau A/D. Sentuh tombol untuk mobile. Level naik tiap 5 skor.</p>
+    </div>
+  </div>
+
+<script>
+// Embedded assets
+const logoData = "data:image/png;base64," + "{logo_b64}";
+const bgMusicData = "data:audio/wav;base64," + "{silent_wav_b64}";
+const catchData = "data:audio/wav;base64," + "{beep_wav_b64}";
+const missData = "data:audio/wav;base64," + "{beep_wav_b64}";
+
+// Canvas + context
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// HUD
+const scoreP = document.getElementById('scoreP');
+const livesP = document.getElementById('livesP');
+const levelP = document.getElementById('levelP');
+
+// Controls
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const startBtn = document.getElementById('startBtn');
+const menuBox = document.getElementById('menuBox');
+
+// Game state
+let score = 0;
+let lives = 3;
+let level = 1;
+let spawnInterval = 900; // ms
+let lastSpawn = 0;
+let objects = [];
+let running = false;
+
+// Load logo image
+const logoImg = new Image();
+logoImg.src = logoData;
+
+// Audio
+const bgMusic = new Audio(bgMusicData);
+bgMusic.loop = true;
+bgMusic.volume = 0.28;
+const catchSound = new Audio(catchData);
+const missSound = new Audio(missData);
+
+// Player paddle
+const paddle = { x: W/2 - 50, y: H - 70, w: 100, h: 18, speed: 8 };
+
+// Input
+let keys = {};
+let leftTouch=false, rightTouch=false;
+let pointerActive=false, pointerX=null;
+
+window.addEventListener('keydown', (e)=>{ keys[e.key] = true; });
+window.addEventListener('keyup', (e)=>{ keys[e.key] = false; });
+
+leftBtn.addEventListener('pointerdown',(e)=>{ leftTouch=true; leftBtn.setPointerCapture(e.pointerId); leftBtn.style.transform='translateY(2px)'; });
+leftBtn.addEventListener('pointerup',(e)=>{ leftTouch=false; leftBtn.style.transform=''; });
+rightBtn.addEventListener('pointerdown',(e)=>{ rightTouch=true; rightBtn.setPointerCapture(e.pointerId); rightBtn.style.transform='translateY(2px)'; });
+rightBtn.addEventListener('pointerup',(e)=>{ rightTouch=false; rightBtn.style.transform=''; });
+
+canvas.addEventListener('pointerdown',(e)=>{ pointerActive=true; const r=canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (canvas.width / r.width); });
+canvas.addEventListener('pointermove',(e)=>{ if(!pointerActive) return; const r=canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (canvas.width / r.width); });
+window.addEventListener('pointerup',()=>{ pointerActive=false; pointerX=null; });
+
+// Start button logic (required to allow audio in mobile/modern browsers)
+startBtn.addEventListener('click', ()=>{ 
+  if (running) return;
+  running = true;
+  menuBox.style.display = 'none';
+  score=0; lives=3; level=1; objects=[]; lastSpawn = performance.now();
+  bgMusic.currentTime = 0;
+  bgMusic.play().catch(()=>{});
+  requestAnimationFrame(loop);
+});
+
+// Spawn object (logo)
+function spawn(){ 
+  const size = 54 - Math.min(30, level*2);
+  const x = Math.random()*(W - size);
+  const speed = 1.6 + level*0.4 + Math.random()*0.6;
+  objects.push({ x, y:-size, size, speed });
+}
+
+// Update & physics
+function update(dt){
+  // input movement
+  let move = 0;
+  if (keys['ArrowLeft'] || keys['a']) move -= 1;
+  if (keys['ArrowRight'] || keys['d']) move += 1;
+  if (leftTouch) move -= 1;
+  if (rightTouch) move += 1;
+
+  if (pointerActive && pointerX !== null){ const diff = pointerX - (paddle.x + paddle.w/2); paddle.x += diff * Math.min(12*dt,1); }
+  else paddle.x += move * paddle.speed * dt;
+
+  paddle.x = Math.max(0, Math.min(W - paddle.w, paddle.x));
+
+  // spawn logic
+  if (performance.now() - lastSpawn > spawnInterval){ spawn(); lastSpawn = performance.now(); }
+
+  // update objects
+  for (let i=objects.length-1;i>=0;i--){ 
+    const o = objects[i];
+    o.y += o.speed * dt * 60; // scaled
+    // collision check (rect vs rect approx)
+    if (o.y + o.size >= paddle.y && o.x + o.size > paddle.x && o.x < paddle.x + paddle.w){ 
+      // caught
+      objects.splice(i,1);
+      score += 1;
+      catchSound.currentTime = 0; catchSound.play();
+      if (score % 5 === 0){ level += 1; spawnInterval = Math.max(350, spawnInterval - 80); }
+      continue;
+    }
+    // missed
+    if (o.y > H + 60){ 
+      objects.splice(i,1);
+      lives -= 1;
+      missSound.currentTime = 0; missSound.play();
+      if (lives <= 0){ running = false; bgMusic.pause(); setTimeout(()=>{ alert('Game Over! Score: ' + score); menuBox.style.display='block'; }, 50); }
+    }
+  }
+}
+
+// Rendering
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // background
+  ctx.fillStyle = '#071a2b';
+  ctx.fillRect(0,0,W,H);
+
+  // draw paddle
+  ctx.fillStyle = '#9be7c4';
+  ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+
+  // draw logos
+  objects.forEach(o=>{ ctx.drawImage(logoImg, o.x, o.y, o.size, o.size); });
+
+  // HUD
+  scoreP.textContent = 'Score: ' + score;
+  livesP.textContent = 'Lives: ' + lives;
+  levelP.textContent = 'Level: ' + level;
+}
+
+// Main loop
+let last = performance.now();
+function loop(ts){
+  const dt = Math.min((ts - last) / 1000, 0.033);
+  last = ts;
+  if (running){ update(dt); draw(); requestAnimationFrame(loop); }
+}
+
+// prevent page scrolling while interacting with game
+['touchstart','touchmove','touchend','touchcancel'].forEach(e=>{ window.addEventListener(e, ev=>{ if(ev.target === canvas || ev.target === leftBtn || ev.target === rightBtn) ev.preventDefault(); }, {passive:false}); });
+
+</script>
+</body>
+</html>
