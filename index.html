@@ -3,18 +3,19 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Step 1 — Catch (Core)</title>
+<title>Step 1 — Catch the Falling (Core)</title>
 <style>
-  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#041022,#071a34);color:#fff}
-  .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
-  canvas{background:linear-gradient(180deg,#072033,#00151f);border-radius:12px;max-width:100%;height:auto;display:block}
-  .hud{position:fixed;left:12px;top:12px;display:flex;gap:8px;font-weight:700}
+  :root{ --bg1:#041022; --bg2:#071a34; --ui:#fff; --accent:#ffd166; }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg1),var(--bg2));font-family:system-ui,Segoe UI,Roboto,Arial;color:var(--ui)}
+  .wrap{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box}
+  canvas{background:linear-gradient(#072033,#00151f);border-radius:12px;display:block;max-width:100%;height:auto}
+  .hud{position:fixed;left:12px;top:12px;font-weight:700;display:flex;gap:10px;align-items:center}
   .pill{background:rgba(255,255,255,0.06);padding:8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,0.04)}
-  .controls{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:12px}
-  .touch{width:78px;height:56px;border-radius:12px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:900;user-select:none}
+  .controls{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+  .touch{width:80px;height:56px;border-radius:12px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-weight:900;user-select:none}
   .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
   .menu{pointer-events:auto;background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;text-align:center}
-  button{cursor:pointer;padding:8px 12px;border-radius:10px;border:none;background:#ffd166;font-weight:800}
+  button{cursor:pointer}
   @media(min-width:900px){ .touch{width:110px;height:70px} }
 </style>
 </head>
@@ -22,31 +23,36 @@
   <div class="hud">
     <div class="pill" id="scoreP">Score: 0</div>
     <div class="pill" id="livesP">Lives: 3</div>
-    <div class="pill" id="levelP" style="display:none">Level: 1</div>
+    <div class="pill" id="levelP">Level: 1</div>
   </div>
 
   <div class="wrap">
-    <canvas id="gameCanvas" width="360" height="640" aria-label="Game canvas"></canvas>
+    <canvas id="gameCanvas" width="360" height="640" aria-label="Game"></canvas>
   </div>
 
   <div class="controls" aria-hidden="false">
     <div class="touch" id="leftBtn">◀</div>
+    <div style="width:12px"></div>
     <div class="touch" id="rightBtn">▶</div>
   </div>
 
-  <div class="overlay" id="menuOverlay">
+  <div class="overlay" id="menuOverlay" style="display:flex">
     <div class="menu" id="menuBox">
       <h2>Catch — Step 1</h2>
-      <p>Kontrol: ← → / A D / drag pada kanvas / tombol sentuh. Klik Start untuk mulai.</p>
+      <p>Kontrol: ← → / A D / drag pada kanvas / tombol sentuh. Mulai untuk mengaktifkan game.</p>
       <div style="margin-top:10px">
         <button id="startBtn">Start Game</button>
+        <button id="muteBtn" style="margin-left:8px;display:none">Mute</button>
       </div>
-      <p style="font-size:12px;opacity:0.85;margin-top:8px">Versi dasar — setelah kamu cek kita lanjut ke leveling, logo & audio.</p>
+      <p style="font-size:12px;opacity:0.85;margin-top:8px">Ini versi dasar. Kita akan lanjut tambah level, logo & musik setelah kamu cek.</p>
     </div>
   </div>
 
 <script>
-/* STEP 1: Core mechanics */
+/* STEP 1: Core mechanics — stable controls + catching + lives
+   Paste as index.html and open in browser.
+*/
+
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const scoreP = document.getElementById('scoreP');
@@ -58,21 +64,32 @@ const leftBtn = document.getElementById('leftBtn');
 const rightBtn = document.getElementById('rightBtn');
 
 const CONFIG = {
-  W: 360, H: 640,
-  bucketW: 84, bucketH: 26, bucketY: 560,
-  bucketSpeed: 420,
-  spawnInterval: 0.9,
-  objMinSize: 14, objMaxSize: 28,
-  objMinSpeed: 120, objMaxSpeed: 220
+  W: 360,
+  H: 640,
+  bucketW: 84,
+  bucketH: 26,
+  bucketY: 560,
+  bucketSpeed: 420,       // px/sec (keyboard/touch repeat)
+  spawnInterval: 0.9,     // sec
+  starMinSize: 14,
+  starMaxSize: 28,
+  starMinSpeed: 120,
+  starMaxSpeed: 220
 };
 
-function resize(){ canvas.width = CONFIG.W; canvas.height = CONFIG.H; }
+// responsive: keep logical canvas size, scale via CSS
+function resize() {
+  // keep logical resolution
+  canvas.width = CONFIG.W;
+  canvas.height = CONFIG.H;
+  // CSS sizing left to browser (max-width)
+}
 window.addEventListener('resize', resize);
 resize();
 
-/* state */
+/* Game state */
 let bucket = { x: CONFIG.W/2, y: CONFIG.bucketY, w: CONFIG.bucketW, h: CONFIG.bucketH };
-let objects = [];
+let stars = [];
 let score = 0;
 let lives = 3;
 let level = 1;
@@ -83,82 +100,90 @@ let leftTouch = false, rightTouch = false;
 let pointerActive = false, pointerX = null;
 let gameState = 'menu'; // menu | playing | over
 
-/* input */
-window.addEventListener('keydown', e=>{
+/* Input: keyboard */
+window.addEventListener('keydown', e => {
   const k = e.key;
   if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = true;
   if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = true;
   if (k === ' ' && gameState !== 'playing') startGame();
 });
-window.addEventListener('keyup', e=>{
+window.addEventListener('keyup', e => {
   const k = e.key;
   if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = false;
   if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = false;
 });
 
-/* touch buttons */
-leftBtn.addEventListener('pointerdown', e=>{ leftTouch=true; leftBtn.setPointerCapture(e.pointerId); leftBtn.style.transform='translateY(2px)'; });
-leftBtn.addEventListener('pointerup', e=>{ leftTouch=false; leftBtn.style.transform=''; });
-leftBtn.addEventListener('pointercancel', e=>{ leftTouch=false; leftBtn.style.transform=''; });
-rightBtn.addEventListener('pointerdown', e=>{ rightTouch=true; rightBtn.setPointerCapture(e.pointerId); rightBtn.style.transform='translateY(2px)'; });
-rightBtn.addEventListener('pointerup', e=>{ rightTouch=false; rightBtn.style.transform=''; });
-rightBtn.addEventListener('pointercancel', e=>{ rightTouch=false; rightBtn.style.transform=''; });
+/* Touch buttons */
+leftBtn.addEventListener('pointerdown', e => { leftTouch = true; leftBtn.setPointerCapture(e.pointerId); leftBtn.style.transform='translateY(2px)'; });
+leftBtn.addEventListener('pointerup', e => { leftTouch = false; leftBtn.style.transform=''; });
+leftBtn.addEventListener('pointercancel', e => { leftTouch = false; leftBtn.style.transform=''; });
+rightBtn.addEventListener('pointerdown', e => { rightTouch = true; rightBtn.setPointerCapture(e.pointerId); rightBtn.style.transform='translateY(2px)'; });
+rightBtn.addEventListener('pointerup', e => { rightTouch = false; rightBtn.style.transform=''; });
+rightBtn.addEventListener('pointercancel', e => { rightTouch = false; rightBtn.style.transform=''; });
 
-/* pointer drag */
-canvas.addEventListener('pointerdown', e=>{
+/* Pointer drag on canvas */
+canvas.addEventListener('pointerdown', e => {
   pointerActive = true;
   const r = canvas.getBoundingClientRect();
   pointerX = (e.clientX - r.left) * (canvas.width / r.width);
 });
-canvas.addEventListener('pointermove', e=>{
+canvas.addEventListener('pointermove', e => {
   if (!pointerActive) return;
   const r = canvas.getBoundingClientRect();
   pointerX = (e.clientX - r.left) * (canvas.width / r.width);
 });
-window.addEventListener('pointerup', ()=>{ pointerActive = false; pointerX = null; });
+window.addEventListener('pointerup', e => { pointerActive = false; pointerX = null; });
 
-/* spawn object */
-function rand(a,b){ return a + Math.random()*(b-a); }
-function spawnObject(){
-  const size = Math.round(rand(CONFIG.objMinSize, CONFIG.objMaxSize));
+/* Spawn factory */
+function spawnStar() {
+  const size = rand(CONFIG.starMinSize, CONFIG.starMaxSize);
   const x = rand(size/2, CONFIG.W - size/2);
-  const speed = rand(CONFIG.objMinSpeed, CONFIG.objMaxSpeed);
-  objects.push({ x, y: -size, r: size/2, speed });
+  const speed = rand(CONFIG.starMinSpeed, CONFIG.starMaxSpeed);
+  stars.push({ x, y: -size, r: size/2, speed });
 }
 
-/* collision rect-circle */
-function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-function rectCircleCollision(rx,ry,rw,rh, cx,cy,cr){
-  const closestX = clamp(cx, rx, rx+rw);
-  const closestY = clamp(cy, ry, ry+rh);
-  const dx = cx - closestX; const dy = cy - closestY;
-  return (dx*dx + dy*dy) <= (cr*cr);
-}
+/* Helpers */
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 
-/* start / end */
-startBtn.addEventListener('click', ()=>{ if (gameState !== 'playing') startGame(); });
+/* Start / Restart */
+startBtn.addEventListener('click', () => {
+  if (gameState !== 'playing') startGame();
+});
+
 function startGame(){
-  score = 0; lives = 3; level = 1; objects = []; elapsedSpawn = 0;
-  bucket.x = CONFIG.W/2; lastTime = performance.now(); gameState = 'playing';
+  score = 0;
+  lives = 3;
+  level = 1;
+  stars = [];
+  elapsedSpawn = 0;
+  lastTime = performance.now();
+  bucket.x = CONFIG.W/2;
+  gameState = 'playing';
   menuOverlay.style.display = 'none';
   requestAnimationFrame(loop);
 }
+
 function endGame(){
   gameState = 'over';
   menuOverlay.style.display = 'flex';
   document.getElementById('menuBox').querySelector('h2').textContent = 'Game Over';
-  document.getElementById('menuBox').querySelector('p').textContent = 'Skor: ' + Math.floor(score) + ' — tekan Start untuk ulang.';
+  document.getElementById('menuBox').querySelector('p').textContent = 'Skor: ' + Math.floor(score) + ' — Tekan Start untuk main lagi.';
   document.getElementById('startBtn').textContent = 'Restart';
 }
 
-/* loop */
+/* Main loop */
 function loop(ts){
-  const dt = Math.min((ts - lastTime)/1000, 0.05);
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
   lastTime = ts;
-  if (gameState === 'playing'){ update(dt); render(); requestAnimationFrame(loop); }
+  if (gameState === 'playing'){
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
 }
 
-/* update */
+/* Update */
 function update(dt){
   // movement
   let move = 0;
@@ -168,48 +193,87 @@ function update(dt){
   if (rightTouch) move += 1;
 
   if (pointerActive && pointerX !== null){
+    // smooth follow pointer
     const diff = pointerX - bucket.x;
     bucket.x += diff * clamp(10*dt, 0, 1);
   } else {
     bucket.x += move * CONFIG.bucketSpeed * dt;
   }
-  // bucket center clamp
   bucket.x = clamp(bucket.x, bucket.w/2, CONFIG.W - bucket.w/2);
 
   // spawn
   elapsedSpawn += dt;
-  if (elapsedSpawn >= CONFIG.spawnInterval){ spawnObject(); elapsedSpawn = 0; }
+  if (elapsedSpawn >= CONFIG.spawnInterval) {
+    spawnStar();
+    elapsedSpawn = 0;
+  }
 
-  // update objects (backwards)
-  for (let i = objects.length - 1; i >= 0; i--){
-    const o = objects[i];
-    o.y += o.speed * dt;
+  // update stars (iterate backwards)
+  for (let i = stars.length - 1; i >= 0; i--){
+    const s = stars[i];
+    s.y += s.speed * dt;
+    // collision: bucket rect centered at bucket.x
     const bx = bucket.x - bucket.w/2;
     const by = bucket.y - bucket.h/2;
-    if (rectCircleCollision(bx, by, bucket.w, bucket.h, o.x, o.y, o.r)){
+    if (rectCircleCollision(bx, by, bucket.w, bucket.h, s.x, s.y, s.r)){
       // caught
-      objects.splice(i,1);
-      score += Math.max(1, Math.round(o.r));
-      spawnObject(); // keep flow
+      stars.splice(i,1);
+      score += Math.max(5, Math.round(s.r)); // increase score
+      // spawn one more to keep flow
+      spawnStar();
       updateHUD();
       continue;
     }
     // missed
-    if (o.y - o.r > CONFIG.H){
-      objects.splice(i,1);
+    if (s.y - s.r > CONFIG.H){
+      stars.splice(i,1);
       lives -= 1;
-      spawnObject();
       updateHUD();
+      spawnStar();
       if (lives <= 0){ endGame(); return; }
     }
   }
 }
 
-/* HUD & render */
-function updateHUD(){ scoreP.textContent = 'Score: ' + Math.floor(score); livesP.textContent = 'Lives: ' + lives; }
+/* HUD */
+function updateHUD(){
+  scoreP.textContent = 'Score: ' + Math.floor(score);
+  livesP.textContent = 'Lives: ' + lives;
+  levelP.textContent = 'Level: ' + level;
+}
+
+/* Render */
+function render(){
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // background stars
+  ctx.save();
+  const gg = ctx.createLinearGradient(0,0,0,canvas.height);
+  gg.addColorStop(0,'rgba(255,255,255,0.02)');
+  gg.addColorStop(1,'rgba(255,255,255,0.00)');
+  ctx.fillStyle = gg;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.restore();
+
+  // draw bucket (simple triangle+rect)
+  drawBucket();
+
+  // draw stars
+  ctx.fillStyle = '#ffd166';
+  for (const s of stars){
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+    // small crater
+    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.arc(s.x - s.r*0.2, s.y - s.r*0.15, s.r*0.28, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+  }
+}
+
+/* draw bucket helper */
 function drawBucket(){
   ctx.save();
   ctx.translate(bucket.x, bucket.y);
+  // body
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
   ctx.moveTo(0, -bucket.h/2);
@@ -217,41 +281,30 @@ function drawBucket(){
   ctx.lineTo(-bucket.w/2, bucket.h/2);
   ctx.closePath();
   ctx.fill();
+  // rim
   ctx.fillStyle = '#ffb84a';
   ctx.fillRect(-bucket.w/2, -bucket.h/2 - 6, bucket.w, 8);
   ctx.restore();
 }
-function render(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  // background stars
-  const gg = ctx.createLinearGradient(0,0,0,canvas.height);
-  gg.addColorStop(0,'rgba(255,255,255,0.02)'); gg.addColorStop(1,'rgba(255,255,255,0)');
-  ctx.fillStyle = gg; ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // bucket
-  drawBucket();
-
-  // objects
-  ctx.fillStyle = '#ffd166';
-  for (const o of objects){
-    ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.arc(o.x - o.r*0.2, o.y - o.r*0.15, o.r*0.28, 0, Math.PI*2); ctx.fill();
-    ctx.fillStyle = '#ffd166';
-  }
-
-  // HUD small text
-  ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '14px system-ui, Arial'; ctx.fillText('Score: ' + Math.floor(score), 12, 22);
-  ctx.fillText('Lives: ' + lives, 12, 42);
+/* rect-circle collision */
+function rectCircleCollision(rx,ry,rw,rh, cx,cy,cr){
+  const closestX = clamp(cx, rx, rx+rw);
+  const closestY = clamp(cy, ry, ry+rh);
+  const dx = cx - closestX;
+  const dy = cy - closestY;
+  return (dx*dx + dy*dy) <= (cr*cr);
 }
 
-/* init */
+/* init HUD */
 updateHUD();
-/* prevent scrolling when interacting with game on touch */
+/* prevent scrolling while interacting on touch */
 ['touchstart','touchmove','touchend','touchcancel'].forEach(ev=>{
   window.addEventListener(ev, e=>{
     if (e.target === canvas || e.target === leftBtn || e.target === rightBtn) e.preventDefault();
   }, {passive:false});
 });
+
 </script>
 </body>
 </html>
