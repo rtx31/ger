@@ -1,21 +1,20 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="id">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Catch the Falling Logos — Ready</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Step 1 — Catch (Core)</title>
 <style>
-  :root{--bg:#071022;--panel:#06202a;--accent:#ffd166}
-  html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#00121a);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#fff}
-  .wrap{display:flex;align-items:center;justify-content:center;height:100%;padding:18px;box-sizing:border-box}
-  canvas{background:linear-gradient(180deg,#071a2b,#00151f);border-radius:12px;max-width:100%;height:auto;display:block}
-  .hud{position:fixed;left:12px;top:12px;display:flex;gap:8px}
-  .pill{background:rgba(255,255,255,0.05);padding:8px 10px;border-radius:999px;font-weight:700}
-  .controls{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#041022,#071a34);color:#fff}
+  .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box}
+  canvas{background:linear-gradient(180deg,#072033,#00151f);border-radius:12px;max-width:100%;height:auto;display:block}
+  .hud{position:fixed;left:12px;top:12px;display:flex;gap:8px;font-weight:700}
+  .pill{background:rgba(255,255,255,0.06);padding:8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,0.04)}
+  .controls{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:12px}
   .touch{width:78px;height:56px;border-radius:12px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:900;user-select:none}
-  .menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
-  .menu-box{pointer-events:auto;background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;text-align:center}
-  button{cursor:pointer;padding:10px 14px;border-radius:10px;border:none;background:var(--accent);font-weight:800}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .menu{pointer-events:auto;background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;text-align:center}
+  button{cursor:pointer;padding:8px 12px;border-radius:10px;border:none;background:#ffd166;font-weight:800}
   @media(min-width:900px){ .touch{width:110px;height:70px} }
 </style>
 </head>
@@ -23,11 +22,11 @@
   <div class="hud">
     <div class="pill" id="scoreP">Score: 0</div>
     <div class="pill" id="livesP">Lives: 3</div>
-    <div class="pill" id="levelP">Level: 1</div>
+    <div class="pill" id="levelP" style="display:none">Level: 1</div>
   </div>
 
   <div class="wrap">
-    <canvas id="gameCanvas" width="420" height="640" aria-label="Catch the Falling Logos"></canvas>
+    <canvas id="gameCanvas" width="360" height="640" aria-label="Game canvas"></canvas>
   </div>
 
   <div class="controls" aria-hidden="false">
@@ -35,170 +34,224 @@
     <div class="touch" id="rightBtn">▶</div>
   </div>
 
-  <div class="menu">
-    <div class="menu-box" id="menuBox">
-      <h2>Catch the Falling Logos</h2>
-      <p>Logo kamu sudah terpasang. Klik <strong>Start</strong> untuk mulai (diperlukan untuk memutar audio).</p>
-      <div style="margin-top:8px">
-        <button id="startBtn">Start</button>
+  <div class="overlay" id="menuOverlay">
+    <div class="menu" id="menuBox">
+      <h2>Catch — Step 1</h2>
+      <p>Kontrol: ← → / A D / drag pada kanvas / tombol sentuh. Klik Start untuk mulai.</p>
+      <div style="margin-top:10px">
+        <button id="startBtn">Start Game</button>
       </div>
-      <p style="font-size:12px;opacity:0.85;margin-top:8px">Kontrol: ← → atau A/D. Sentuh tombol untuk mobile. Level naik tiap 5 skor.</p>
+      <p style="font-size:12px;opacity:0.85;margin-top:8px">Versi dasar — setelah kamu cek kita lanjut ke leveling, logo & audio.</p>
     </div>
   </div>
 
 <script>
-// Embedded assets
-const logoData = "data:image/png;base64," + "{logo_b64}";
-const bgMusicData = "data:audio/wav;base64," + "{silent_wav_b64}";
-const catchData = "data:audio/wav;base64," + "{beep_wav_b64}";
-const missData = "data:audio/wav;base64," + "{beep_wav_b64}";
-
-// Canvas + context
+/* STEP 1: Core mechanics */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
-
-// HUD
 const scoreP = document.getElementById('scoreP');
 const livesP = document.getElementById('livesP');
 const levelP = document.getElementById('levelP');
-
-// Controls
+const menuOverlay = document.getElementById('menuOverlay');
+const startBtn = document.getElementById('startBtn');
 const leftBtn = document.getElementById('leftBtn');
 const rightBtn = document.getElementById('rightBtn');
-const startBtn = document.getElementById('startBtn');
-const menuBox = document.getElementById('menuBox');
 
-// Game state
+const CONFIG = {
+  W: 360, H: 640,
+  bucketW: 84, bucketH: 26, bucketY: 560,
+  bucketSpeed: 420,
+  spawnInterval: 0.9,
+  objMinSize: 14, objMaxSize: 28,
+  objMinSpeed: 120, objMaxSpeed: 220
+};
+
+function resize(){ canvas.width = CONFIG.W; canvas.height = CONFIG.H; }
+window.addEventListener('resize', resize);
+resize();
+
+/* state */
+let bucket = { x: CONFIG.W/2, y: CONFIG.bucketY, w: CONFIG.bucketW, h: CONFIG.bucketH };
+let objects = [];
 let score = 0;
 let lives = 3;
 let level = 1;
-let spawnInterval = 900; // ms
-let lastSpawn = 0;
-let objects = [];
-let running = false;
-
-// Load logo image
-const logoImg = new Image();
-logoImg.src = logoData;
-
-// Audio
-const bgMusic = new Audio(bgMusicData);
-bgMusic.loop = true;
-bgMusic.volume = 0.28;
-const catchSound = new Audio(catchData);
-const missSound = new Audio(missData);
-
-// Player paddle
-const paddle = { x: W/2 - 50, y: H - 70, w: 100, h: 18, speed: 8 };
-
-// Input
+let elapsedSpawn = 0;
+let lastTime = 0;
 let keys = {};
-let leftTouch=false, rightTouch=false;
-let pointerActive=false, pointerX=null;
+let leftTouch = false, rightTouch = false;
+let pointerActive = false, pointerX = null;
+let gameState = 'menu'; // menu | playing | over
 
-window.addEventListener('keydown', (e)=>{ keys[e.key] = true; });
-window.addEventListener('keyup', (e)=>{ keys[e.key] = false; });
-
-leftBtn.addEventListener('pointerdown',(e)=>{ leftTouch=true; leftBtn.setPointerCapture(e.pointerId); leftBtn.style.transform='translateY(2px)'; });
-leftBtn.addEventListener('pointerup',(e)=>{ leftTouch=false; leftBtn.style.transform=''; });
-rightBtn.addEventListener('pointerdown',(e)=>{ rightTouch=true; rightBtn.setPointerCapture(e.pointerId); rightBtn.style.transform='translateY(2px)'; });
-rightBtn.addEventListener('pointerup',(e)=>{ rightTouch=false; rightBtn.style.transform=''; });
-
-canvas.addEventListener('pointerdown',(e)=>{ pointerActive=true; const r=canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (canvas.width / r.width); });
-canvas.addEventListener('pointermove',(e)=>{ if(!pointerActive) return; const r=canvas.getBoundingClientRect(); pointerX = (e.clientX - r.left) * (canvas.width / r.width); });
-window.addEventListener('pointerup',()=>{ pointerActive=false; pointerX=null; });
-
-// Start button logic (required to allow audio in mobile/modern browsers)
-startBtn.addEventListener('click', ()=>{ 
-  if (running) return;
-  running = true;
-  menuBox.style.display = 'none';
-  score=0; lives=3; level=1; objects=[]; lastSpawn = performance.now();
-  bgMusic.currentTime = 0;
-  bgMusic.play().catch(()=>{});
-  requestAnimationFrame(loop);
+/* input */
+window.addEventListener('keydown', e=>{
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = true;
+  if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = true;
+  if (k === ' ' && gameState !== 'playing') startGame();
+});
+window.addEventListener('keyup', e=>{
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') keys.left = false;
+  if (k === 'ArrowRight' || k === 'd' || k === 'D') keys.right = false;
 });
 
-// Spawn object (logo)
-function spawn(){ 
-  const size = 54 - Math.min(30, level*2);
-  const x = Math.random()*(W - size);
-  const speed = 1.6 + level*0.4 + Math.random()*0.6;
-  objects.push({ x, y:-size, size, speed });
+/* touch buttons */
+leftBtn.addEventListener('pointerdown', e=>{ leftTouch=true; leftBtn.setPointerCapture(e.pointerId); leftBtn.style.transform='translateY(2px)'; });
+leftBtn.addEventListener('pointerup', e=>{ leftTouch=false; leftBtn.style.transform=''; });
+leftBtn.addEventListener('pointercancel', e=>{ leftTouch=false; leftBtn.style.transform=''; });
+rightBtn.addEventListener('pointerdown', e=>{ rightTouch=true; rightBtn.setPointerCapture(e.pointerId); rightBtn.style.transform='translateY(2px)'; });
+rightBtn.addEventListener('pointerup', e=>{ rightTouch=false; rightBtn.style.transform=''; });
+rightBtn.addEventListener('pointercancel', e=>{ rightTouch=false; rightBtn.style.transform=''; });
+
+/* pointer drag */
+canvas.addEventListener('pointerdown', e=>{
+  pointerActive = true;
+  const r = canvas.getBoundingClientRect();
+  pointerX = (e.clientX - r.left) * (canvas.width / r.width);
+});
+canvas.addEventListener('pointermove', e=>{
+  if (!pointerActive) return;
+  const r = canvas.getBoundingClientRect();
+  pointerX = (e.clientX - r.left) * (canvas.width / r.width);
+});
+window.addEventListener('pointerup', ()=>{ pointerActive = false; pointerX = null; });
+
+/* spawn object */
+function rand(a,b){ return a + Math.random()*(b-a); }
+function spawnObject(){
+  const size = Math.round(rand(CONFIG.objMinSize, CONFIG.objMaxSize));
+  const x = rand(size/2, CONFIG.W - size/2);
+  const speed = rand(CONFIG.objMinSpeed, CONFIG.objMaxSpeed);
+  objects.push({ x, y: -size, r: size/2, speed });
 }
 
-// Update & physics
+/* collision rect-circle */
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function rectCircleCollision(rx,ry,rw,rh, cx,cy,cr){
+  const closestX = clamp(cx, rx, rx+rw);
+  const closestY = clamp(cy, ry, ry+rh);
+  const dx = cx - closestX; const dy = cy - closestY;
+  return (dx*dx + dy*dy) <= (cr*cr);
+}
+
+/* start / end */
+startBtn.addEventListener('click', ()=>{ if (gameState !== 'playing') startGame(); });
+function startGame(){
+  score = 0; lives = 3; level = 1; objects = []; elapsedSpawn = 0;
+  bucket.x = CONFIG.W/2; lastTime = performance.now(); gameState = 'playing';
+  menuOverlay.style.display = 'none';
+  requestAnimationFrame(loop);
+}
+function endGame(){
+  gameState = 'over';
+  menuOverlay.style.display = 'flex';
+  document.getElementById('menuBox').querySelector('h2').textContent = 'Game Over';
+  document.getElementById('menuBox').querySelector('p').textContent = 'Skor: ' + Math.floor(score) + ' — tekan Start untuk ulang.';
+  document.getElementById('startBtn').textContent = 'Restart';
+}
+
+/* loop */
+function loop(ts){
+  const dt = Math.min((ts - lastTime)/1000, 0.05);
+  lastTime = ts;
+  if (gameState === 'playing'){ update(dt); render(); requestAnimationFrame(loop); }
+}
+
+/* update */
 function update(dt){
-  // input movement
+  // movement
   let move = 0;
-  if (keys['ArrowLeft'] || keys['a']) move -= 1;
-  if (keys['ArrowRight'] || keys['d']) move += 1;
+  if (keys.left) move -= 1;
+  if (keys.right) move += 1;
   if (leftTouch) move -= 1;
   if (rightTouch) move += 1;
 
-  if (pointerActive && pointerX !== null){ const diff = pointerX - (paddle.x + paddle.w/2); paddle.x += diff * Math.min(12*dt,1); }
-  else paddle.x += move * paddle.speed * dt;
+  if (pointerActive && pointerX !== null){
+    const diff = pointerX - bucket.x;
+    bucket.x += diff * clamp(10*dt, 0, 1);
+  } else {
+    bucket.x += move * CONFIG.bucketSpeed * dt;
+  }
+  // bucket center clamp
+  bucket.x = clamp(bucket.x, bucket.w/2, CONFIG.W - bucket.w/2);
 
-  paddle.x = Math.max(0, Math.min(W - paddle.w, paddle.x));
+  // spawn
+  elapsedSpawn += dt;
+  if (elapsedSpawn >= CONFIG.spawnInterval){ spawnObject(); elapsedSpawn = 0; }
 
-  // spawn logic
-  if (performance.now() - lastSpawn > spawnInterval){ spawn(); lastSpawn = performance.now(); }
-
-  // update objects
-  for (let i=objects.length-1;i>=0;i--){ 
+  // update objects (backwards)
+  for (let i = objects.length - 1; i >= 0; i--){
     const o = objects[i];
-    o.y += o.speed * dt * 60; // scaled
-    // collision check (rect vs rect approx)
-    if (o.y + o.size >= paddle.y && o.x + o.size > paddle.x && o.x < paddle.x + paddle.w){ 
+    o.y += o.speed * dt;
+    const bx = bucket.x - bucket.w/2;
+    const by = bucket.y - bucket.h/2;
+    if (rectCircleCollision(bx, by, bucket.w, bucket.h, o.x, o.y, o.r)){
       // caught
       objects.splice(i,1);
-      score += 1;
-      catchSound.currentTime = 0; catchSound.play();
-      if (score % 5 === 0){ level += 1; spawnInterval = Math.max(350, spawnInterval - 80); }
+      score += Math.max(1, Math.round(o.r));
+      spawnObject(); // keep flow
+      updateHUD();
       continue;
     }
     // missed
-    if (o.y > H + 60){ 
+    if (o.y - o.r > CONFIG.H){
       objects.splice(i,1);
       lives -= 1;
-      missSound.currentTime = 0; missSound.play();
-      if (lives <= 0){ running = false; bgMusic.pause(); setTimeout(()=>{ alert('Game Over! Score: ' + score); menuBox.style.display='block'; }, 50); }
+      spawnObject();
+      updateHUD();
+      if (lives <= 0){ endGame(); return; }
     }
   }
 }
 
-// Rendering
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  // background
-  ctx.fillStyle = '#071a2b';
-  ctx.fillRect(0,0,W,H);
+/* HUD & render */
+function updateHUD(){ scoreP.textContent = 'Score: ' + Math.floor(score); livesP.textContent = 'Lives: ' + lives; }
+function drawBucket(){
+  ctx.save();
+  ctx.translate(bucket.x, bucket.y);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(0, -bucket.h/2);
+  ctx.lineTo(bucket.w/2, bucket.h/2);
+  ctx.lineTo(-bucket.w/2, bucket.h/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#ffb84a';
+  ctx.fillRect(-bucket.w/2, -bucket.h/2 - 6, bucket.w, 8);
+  ctx.restore();
+}
+function render(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // background stars
+  const gg = ctx.createLinearGradient(0,0,0,canvas.height);
+  gg.addColorStop(0,'rgba(255,255,255,0.02)'); gg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = gg; ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // draw paddle
-  ctx.fillStyle = '#9be7c4';
-  ctx.fillRect(paddle.x, paddle.y, paddle.w, paddle.h);
+  // bucket
+  drawBucket();
 
-  // draw logos
-  objects.forEach(o=>{ ctx.drawImage(logoImg, o.x, o.y, o.size, o.size); });
+  // objects
+  ctx.fillStyle = '#ffd166';
+  for (const o of objects){
+    ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.arc(o.x - o.r*0.2, o.y - o.r*0.15, o.r*0.28, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffd166';
+  }
 
-  // HUD
-  scoreP.textContent = 'Score: ' + score;
-  livesP.textContent = 'Lives: ' + lives;
-  levelP.textContent = 'Level: ' + level;
+  // HUD small text
+  ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '14px system-ui, Arial'; ctx.fillText('Score: ' + Math.floor(score), 12, 22);
+  ctx.fillText('Lives: ' + lives, 12, 42);
 }
 
-// Main loop
-let last = performance.now();
-function loop(ts){
-  const dt = Math.min((ts - last) / 1000, 0.033);
-  last = ts;
-  if (running){ update(dt); draw(); requestAnimationFrame(loop); }
-}
-
-// prevent page scrolling while interacting with game
-['touchstart','touchmove','touchend','touchcancel'].forEach(e=>{ window.addEventListener(e, ev=>{ if(ev.target === canvas || ev.target === leftBtn || ev.target === rightBtn) ev.preventDefault(); }, {passive:false}); });
-
+/* init */
+updateHUD();
+/* prevent scrolling when interacting with game on touch */
+['touchstart','touchmove','touchend','touchcancel'].forEach(ev=>{
+  window.addEventListener(ev, e=>{
+    if (e.target === canvas || e.target === leftBtn || e.target === rightBtn) e.preventDefault();
+  }, {passive:false});
+});
 </script>
 </body>
 </html>
