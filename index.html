@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Catch the Falling Stars</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: linear-gradient(#00111a, #000);
+      color: white;
+      font-family: sans-serif;
+    }
+    canvas {
+      display: block;
+      margin: auto;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const logoImg = new Image();
+  logoImg.src = "data:image/png;base64,REPLACE_WITH_BASE64_LOGO";
+
+  let basket = {
+    x: canvas.width / 2 - 50,
+    y: canvas.height - 80,
+    width: 100,
+    height: 20,
+    speed: 10
+  };
+
+  let stars = [];
+  let score = 0;
+  let lives = 3;
+  let level = 1;
+  let starsPerLevel = 1;
+  let starSpeed = 3;
+  let gameOver = false;
+
+  const bgMusic = new Audio("data:audio/mp3;base64,SUQzAwAAAAAAF1RTU0UAAAAPAAADTGF2ZjU4LjMyLjEwMAAAAAAAAAAAAAAA//tQxAADBfYASWludGVncmF0ZWQgYnkgQ2hhdEdQVCBtdXNpYyBleGFtcGxlAAAA//sQxAADBlYAQnVubnkAAAA=");
+  const catchSound = new Audio("data:audio/mp3;base64,SUQzAwAAAAAAF1RTU0UAAAAPAAADTGF2ZjU4LjMyLjEwMAAAAAAAAAAAAAAA//tQxAADBfYAS2F1Z2h0IHNvdW5kIGV4YW1wbGUAAA==");
+  const loseLifeSound = new Audio("data:audio/mp3;base64,SUQzAwAAAAAAF1RTU0UAAAAPAAADTGF2ZjU4LjMyLjEwMAAAAAAAAAAAAAAA//tQxAADCXwATmVnYXRpdmUgc291bmQgZXhhbXBsZQAA");
+
+  bgMusic.loop = true;
+  bgMusic.volume = 0.3;
+
+  function createStar() {
+    return {
+      x: Math.random() * (canvas.width - 20),
+      y: -20,
+      radius: 10,
+      speed: starSpeed
+    };
+  }
+
+  function nextLevel() {
+    level++;
+    starSpeed += 1;
+    starsPerLevel++;
+  }
+
+  function resetGame() {
+    score = 0;
+    lives = 3;
+    level = 1;
+    starsPerLevel = 1;
+    starSpeed = 3;
+    stars = [];
+    gameOver = false;
+    bgMusic.currentTime = 0;
+    bgMusic.play();
+  }
+
+  function update() {
+    if (gameOver) return;
+
+    while (stars.length < starsPerLevel) {
+      stars.push(createStar());
+    }
+
+    stars.forEach((star, index) => {
+      star.y += star.speed;
+
+      if (
+        star.y + star.radius >= basket.y &&
+        star.x >= basket.x &&
+        star.x <= basket.x + basket.width
+      ) {
+        score++;
+        catchSound.currentTime = 0;
+        catchSound.play();
+        stars.splice(index, 1);
+
+        if (score % 10 === 0) {
+          nextLevel();
+        }
+      }
+        
+      else if (star.y > canvas.height) {
+        lives--;
+        loseLifeSound.currentTime = 0;
+        loseLifeSound.play();
+        stars.splice(index, 1);
+        if (lives <= 0) {
+          gameOver = true;
+          bgMusic.pause();
+        }
+      }
+    });
+  }
+
+  function drawBasket() {
+    ctx.fillStyle = "orange";
+    ctx.fillRect(basket.x, basket.y, basket.width, basket.height);
+  }
+
+  function drawStars() {
+    ctx.fillStyle = "yellow";
+    stars.forEach(star => {
+      ctx.beginPath();
+      ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = "white";
+    ctx.font = "20px Arial";
+    ctx.fillText(`Score: ${score}`, 20, 30);
+    ctx.fillText(`Lives: ${lives}`, 20, 60);
+    ctx.fillText(`Level: ${level}`, 20, 90);
+  }
+
+  function drawGameOver() {
+    ctx.fillStyle = "red";
+    ctx.font = "50px Arial";
+    ctx.fillText("GAME OVER", canvas.width / 2 - 150, canvas.height / 2);
+    ctx.font = "20px Arial";
+    ctx.fillText("Press ENTER to Restart", canvas.width / 2 - 120, canvas.height / 2 + 40);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBasket();
+    drawStars();
+    drawHUD();
+    if (gameOver) drawGameOver();
+  }
+
+  function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft" && basket.x > 0) {
+      basket.x -= basket.speed;
+    }
+    if (e.key === "ArrowRight" && basket.x < canvas.width - basket.width) {
+      basket.x += basket.speed;
+    }
+    if (e.key === "Enter" && gameOver) {
+      resetGame();
+    }
+  });
+
+  window.addEventListener("click", () => {
+    if (!bgMusic.playing) {
+      bgMusic.play();
+    }
+  });
+
+  bgMusic.play();
+  gameLoop();
+</script>
+</body>
+</html>
