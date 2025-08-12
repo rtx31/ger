@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Catch the Falling Stars — Game Sederhana</title>
+<style>
+  :root {
+    --bg1: #041022;
+    --bg2: #071a34;
+    --ui: rgba(255,255,255,0.92);
+    --accent: #ffd166;
+    --accent2: #6ee7b7;
+  }
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,'Helvetica Neue';background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--ui);}
+  .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box;}
+  #gameCanvas{display:block;width:360px;max-width:92vw;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.6);background:linear-gradient(180deg,#081a2b 0%, #01202b 100%);}
+  .hud{position:fixed;left:14px;top:14px;font-weight:700;display:flex;gap:12px;align-items:center;}
+  .hud .pill{background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.04);}
+  .controls-fixed{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center}
+  .big-btn{padding:10px 14px;border-radius:10px;border:none;background:var(--accent);color:#042; font-weight:800;cursor:pointer}
+  .small-btn{padding:8px 10px;border-radius:8px;border:none;background:rgba(255,255,255,0.06);color:var(--ui);cursor:pointer}
+  .touch-row{display:flex;gap:8px}
+  .touch-btn{width:68px;height:56px;border-radius:10px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;user-select:none}
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .menu{pointer-events:auto;background:rgba(0,0,0,0.6);padding:18px;border-radius:12px;text-align:center;min-width:260px;color:var(--ui)}
+  .menu h2{margin:0 0 6px 0}
+  .menu p{margin:6px 0 10px 0;font-size:14px;opacity:0.95}
+  .footer-note{position:fixed;right:12px;bottom:10px;font-size:12px;opacity:0.7}
+  @media (min-width:900px){
+    #gameCanvas{width:420px}
+    .touch-btn{width:96px;height:70px}
+  }
+</style>
+</head>
+<body>
+  <div class="hud" aria-hidden="false">
+    <div class="pill" id="scoreP">Score: 0</div>
+    <div class="pill" id="livesP">Lives: 1</div>
+  </div>
+
+  <div class="wrap">
+    <canvas id="gameCanvas" width="360" height="640" role="img" aria-label="Catch the Falling Stars game"></canvas>
+  </div>
+
+  <div class="controls-fixed" aria-hidden="false">
+    <button class="big-btn" id="startBtn">Start</button>
+    <button class="small-btn" id="muteBtn">Mute</button>
+    <div style="width:10px"></div>
+    <div class="touch-row" id="touchControls">
+      <div class="touch-btn" id="leftBtn">◀</div>
+      <div class="touch-btn" id="rightBtn">▶</div>
+    </div>
+  </div>
+
+  <div class="overlay" id="menuOverlay" style="display:flex">
+    <div class="menu" id="menuBox">
+      <h2>Catch the Falling Stars</h2>
+      <p>Gerakkan keranjang untuk menangkap bintang. Satu bintang jatuh = Game Over. Gunakan keyboard atau sentuh tombol di bawah.</p>
+      <div>
+        <button class="big-btn" id="menuStart">Play</button>
+      </div>
+      <p style="font-size:12px;opacity:0.8;margin-top:8px">Kode mudah dimodifikasi — lihat variabel CONFIG pada kode.</p>
+    </div>
+  </div>
+
+  <div class="footer-note">Tip: klik/ketuk kanvas lalu seret untuk pindahkan keranjang</div>
+
+<script>
+/*
+  Catch the Falling Stars
+  - Single file index.html
+  - Controls: ArrowLeft / ArrowRight / Pointer drag / Left-Right touch buttons
+  - One miss = Game Over (simple & addicting)
+  CONFIG block mudah diubah.
+*/
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const menuOverlay = document.getElementById('menuOverlay');
+const menuStart = document.getElementById('menuStart');
+const muteBtn = document.getElementById('muteBtn');
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+const scoreP = document.getElementById('scoreP');
+const livesP = document.getElementById('livesP');
+
+const CONFIG = {
+  logicalWidth: 360,
+  logicalHeight: 640,
+  bucketWidth: 92,
+  bucketHeight: 28,
+  bucketY: 580,
+  bucketSpeed: 420,       // px/sec for keyboard
+  spawnInterval: 0.9,     // seconds
+  starMinSize: 12,
+  starMaxSize: 26,
+  starMinSpeed: 120,
+  starMaxSpeed: 300,
+  gravity: 1.0,
+  maxStarsOnScreen: 6
+};
+
+let lastTime = 0;
+let stars = [];
+let score = 0;
+let lives = 1; // per spec: one miss ends game
+let gameState = 'menu'; // 'menu' | 'playing' | 'over'
+let elapsedSpawn = 0;
+let keys = {};
+let leftTouch = false, rightTouch = false;
+let pointerActive = false;
+let pointerX = null;
+let muted = false;
+let audioCtx = null;
+
+/* Player bucket */
+const bucket = {
+  x: CONFIG.logicalWidth / 2,
+  y: CONFIG.bucketY,
+  w: CONFIG.bucketWidth,
+  h: CONFIG.bucketHeight
+};
+
+/* responsiveness: keep logical canvas size, scale with CSS */
+function resizeCanvas(){
+  canvas.width = CONFIG.logicalWidth;
+  canvas.height = CONFIG.logicalHeight;
+  // CSS size is handled by CSS rules (max-width), so no further action
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+/* Audio beep */
+function beep(freq=520, duration=0.06, vol=0.08){
+  if (muted) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = freq;
+    g.gain.value = vol;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    o.stop(audioCtx.currentTime + duration);
+  } catch(e) { /* ignore */ }
+}
+
+/* Helpers */
+function rand(a,b){ return a + Math.random() * (b-a); }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+/* Star factory */
+function spawnStar(){
+  if (stars.length >= CONFIG.maxStarsOnScreen) return;
+  const size = rand(CONFIG.starMinSize, CONFIG.starMaxSize);
+  const x = rand(size/2, CONFIG.logicalWidth - size/2);
+  const speed = rand(CONFIG.starMinSpeed, CONFIG.starMaxSpeed);
+  const angle = rand(-0.3, 0.3); // slight drift
+  stars.push({ x, y: -size, r: size/2, speed, angle });
+}
+
+/* Input: keyboard */
+window.addEventListener('keydown', e=>{
+  if (e.key === 'ArrowLeft') keys.left = true;
+  if (e.key === 'ArrowRight') keys.right = true;
+  if (e.key === ' ' && gameState !== 'playing') startGame();
+});
+window.addEventListener('keyup', e=>{
+  if (e.key === 'ArrowLeft') keys.left = false;
+  if (e.key === 'ArrowRight') keys.right = false;
+});
+
+/* Touch buttons pointer events */
+[leftBtn,rightBtn].forEach(btn=>{
+  btn.addEventListener('pointerdown', (ev)=>{
+    ev.preventDefault();
+    if (btn === leftBtn) leftTouch = true; else rightTouch = true;
+    btn.setPointerCapture(ev.pointerId);
+    btn.style.transform = 'translateY(2px)';
+  });
+  btn.addEventListener('pointerup', (ev)=>{
+    if (btn === leftBtn) leftTouch = false; else rightTouch = false;
+    btn.style.transform = '';
+  });
+  btn.addEventListener('pointercancel', (ev)=>{
+    leftTouch = rightTouch = false;
+    btn.style.transform = '';
+  });
+});
+
+/* Pointer drag on canvas */
+canvas.addEventListener('pointerdown', (e)=>{
+  pointerActive = true;
+  const rect = canvas.getBoundingClientRect();
+  pointerX = (e.clientX - rect.left) * (canvas.width / rect.width);
+});
+canvas.addEventListener('pointermove', (e)=>{
+  if (!pointerActive) return;
+  const rect = canvas.getBoundingClientRect();
+  pointerX = (e.clientX - rect.left) * (canvas.width / rect.width);
+});
+window.addEventListener('pointerup', ()=>{ pointerActive = false; pointerX = null; });
+
+/* Start / Menu buttons */
+startBtn.addEventListener('click', ()=> {
+  if (gameState !== 'playing') startGame();
+});
+menuStart.addEventListener('click', startGame);
+muteBtn.addEventListener('click', ()=> {
+  muted = !muted;
+  muteBtn.textContent = muted ? 'Unmute' : 'Mute';
+});
+
+/* Game lifecycle */
+function startGame(){
+  score = 0;
+  lives = 1;
+  stars = [];
+  elapsedSpawn = 0;
+  bucket.x = CONFIG.logicalWidth / 2;
+  gameState = 'playing';
+  menuOverlay.style.display = 'none';
+  startBtn.textContent = 'Playing';
+  lastTime = performance.now();
+  beep(880, 0.04, 0.06);
+  requestAnimationFrame(loop);
+  updateHUD();
+}
+function gameOver(){
+  gameState = 'over';
+  menuOverlay.style.display = 'flex';
+  document.getElementById('menuBox').querySelector('h2').textContent = 'Game Over';
+  document.getElementById('menuBox').querySelector('p').textContent = 'Skor: ' + Math.floor(score) + ' — Tangkap lagi kalau berani!';
+  menuStart.textContent = 'Restart';
+  startBtn.textContent = 'Start';
+  beep(120, 0.18, 0.08);
+  updateHUD();
+}
+
+/* Main loop */
+function loop(ts){
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  if (gameState === 'playing') {
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+}
+
+/* Update */
+function update(dt){
+  // movement from keyboard, touch buttons, or pointer
+  let move = 0;
+  if (keys.left) move -= 1;
+  if (keys.right) move += 1;
+  if (leftTouch) move -= 1;
+  if (rightTouch) move += 1;
+
+  if (pointerActive && pointerX !== null) {
+    // pointerX is in canvas coords
+    const targetX = pointerX;
+    const diff = targetX - bucket.x;
+    // smooth approach
+    bucket.x += diff * clamp(6 * dt, 0, 1);
+  } else {
+    bucket.x += move * CONFIG.bucketSpeed * dt;
+  }
+  bucket.x = clamp(bucket.x, bucket.w/2, CONFIG.logicalWidth - bucket.w/2);
+
+  // spawn stars
+  elapsedSpawn += dt;
+  if (elapsedSpawn >= CONFIG.spawnInterval) {
+    spawnStar();
+    elapsedSpawn = 0;
+  }
+
+  // update stars
+  for (let i = stars.length - 1; i >= 0; i--) {
+    const s = stars[i];
+    s.y += s.speed * dt * CONFIG.gravity;
+    s.x += Math.sin(s.angle + s.y * 0.002) * 0.8; // little drift
+    // collision with bucket: treat bucket as rect centered
+    const bx = bucket.x - bucket.w/2;
+    const by = bucket.y - bucket.h/2;
+    if (rectCircleCollision(bx, by, bucket.w, bucket.h, s.x, s.y, s.r)) {
+      // caught
+      stars.splice(i,1);
+      score += Math.round(10 + s.r * 2);
+      beep(720, 0.04, 0.06);
+      updateHUD();
+      continue;
+    }
+    // missed (hit ground)
+    if (s.y - s.r > CONFIG.logicalHeight) {
+      stars.splice(i,1);
+      // per spec: one miss = game over
+      lives -= 1;
+      updateHUD();
+      if (lives <= 0) { gameOver(); return; }
+    }
+  }
+}
+
+/* HUD update */
+function updateHUD(){
+  scoreP.textContent = 'Score: ' + Math.floor(score);
+  livesP.textContent = 'Lives: ' + lives;
+}
+
+/* Rendering */
+function render(){
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // background gradient
+  const g = ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0,'#071a2b');
+  g.addColorStop(1,'#001722');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // stars in background (twinkle)
+  drawBackgroundStars();
+
+  // draw bucket shadow
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(bucket.x, bucket.y + 22, bucket.w*0.5, 8, 0, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // draw bucket
+  drawBucket();
+
+  // draw falling stars
+  for (const s of stars) drawStar(s);
+
+  // top left scoreboard small
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillRect(10, 10, 120, 34);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px system-ui, Arial';
+  ctx.fillText('Score: ' + Math.floor(score), 18, 32);
+  ctx.restore();
+}
+
+/* draw helpers */
+function drawBackgroundStars(){
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  for (let i=0;i<30;i++){
+    const sx = (i*97) % canvas.width;
+    const sy = ((i*43) + (Math.floor(score)%canvas.height)) % canvas.height;
+    const r = (i%7===0)?1.6:0.9;
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawBucket(){
+  ctx.save();
+  ctx.translate(bucket.x, bucket.y);
+  // bucket body
+  ctx.beginPath();
+  ctx.moveTo(-bucket.w/2, 8);
+  ctx.lineTo(bucket.w/2, 8);
+  ctx.quadraticCurveTo(bucket.w/2 - 10, 12, bucket.w/2 - 18, 18);
+  ctx.lineTo(-bucket.w/2 + 18, 18);
+  ctx.quadraticCurveTo(-bucket.w/2 + 10, 12, -bucket.w/2, 8);
+  ctx.closePath();
+  // fill
+  ctx.fillStyle = '#ffd166';
+  ctx.fill();
+  // rim
+  ctx.fillStyle = '#ffb84a';
+  ctx.fillRect(-bucket.w/2, -6, bucket.w, 10);
+  // stripes
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  for (let i=-1;i<=1;i++){
+    ctx.fillRect(i*12 - bucket.w/2 + bucket.w*0.25, 0, 6, 16);
+  }
+  ctx.restore();
+}
+
+function drawStar(s){
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  const r = s.r;
+  // glow
+  const grad = ctx.createRadialGradient(0,0,r*1.2,0,0,r*0.1);
+  grad.addColorStop(0,'rgba(255,255,255,0.95)');
+  grad.addColorStop(0.5,'rgba(255,220,120,0.9)');
+  grad.addColorStop(1,'rgba(255,190,60,0.05)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0,0,r*1.2,0,Math.PI*2); ctx.fill();
+
+  // simple 5-point star
+  ctx.fillStyle = '#fff9d9';
+  ctx.beginPath();
+  for (let i=0;i<5;i++){
+    const ang = i * (Math.PI*2)/5 - Math.PI/2;
+    const ox = Math.cos(ang) * r;
+    const oy = Math.sin(ang) * r;
+    ctx.lineTo(ox, oy);
+    const ang2 = ang + Math.PI/5;
+    ctx.lineTo(Math.cos(ang2)*r*0.5, Math.sin(ang2)*r*0.5);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* collision: rectangle (rx,ry,rw,rh) vs circle (cx,cy,cr) */
+function rectCircleCollision(rx,ry,rw,rh, cx,cy,cr){
+  const closestX = clamp(cx, rx, rx + rw);
+  const closestY = clamp(cy, ry, ry + rh);
+  const dx = cx - closestX;
+  const dy = cy - closestY;
+  return (dx*dx + dy*dy) <= (cr*cr);
+}
+
+/* initial menu visible */
+menuOverlay.style.display = 'flex';
+updateHUD();
+
+/* accessibility: click canvas to focus and start */
+canvas.addEventListener('click', ()=>{
+  if (gameState !== 'playing') startGame();
+});
+</script>
+</body>
+</html>
